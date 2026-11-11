@@ -89,6 +89,27 @@ jobs:
           command -v curl_chrome116
           curl_chrome116 --version | head -1
 
+      - name: Diagnose Cloudflare response
+        if: contains(inputs.apk_link, 'apkmirror.com')
+        continue-on-error: true
+        env:
+          APK_LINK: ${{ inputs.apk_link }}
+        run: |
+          probe() {
+            local name="$1" url="$2"
+            shift 2
+            local code
+            code="$("$@" -s -o /tmp/p.html -D /tmp/p.hdr -w '%{http_code}' --max-time 30 "$url" || true)"
+            echo "== $name -> HTTP $code"
+            grep -iE '^(cf-mitigated|server|cf-ray):' /tmp/p.hdr || true
+            grep -oiP '<title>\K[^<]+' /tmp/p.html | head -1 || true
+          }
+          WARP=socks5h://127.0.0.1:40000
+          probe "chrome116 + WARP, page" "$APK_LINK" curl_chrome116 --proxy "$WARP"
+          probe "chrome116 + WARP, homepage" "https://www.apkmirror.com/" curl_chrome116 --proxy "$WARP"
+          probe "chrome116 direct, page" "$APK_LINK" curl_chrome116
+          probe "plain curl + WARP, page" "$APK_LINK" curl --proxy "$WARP"
+
       - name: Download source APK
         env:
           APK_LINK: ${{ inputs.apk_link }}
