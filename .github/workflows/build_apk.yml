@@ -52,9 +52,24 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y xmlstarlet
 
+      - name: Install curl-impersonate
+        if: contains(inputs.apk_link, 'apkmirror.com')
+        run: |
+          set -euo pipefail
+          VER=v0.6.1
+          curl -fL --retry 3 \
+            "https://github.com/lwthiker/curl-impersonate/releases/download/${VER}/curl-impersonate-${VER}.x86_64-linux-gnu.tar.gz" \
+            -o ci.tgz
+          sudo tar -xzf ci.tgz -C /usr/local/bin
+          rm -f ci.tgz
+          command -v curl_chrome116
+          curl_chrome116 --version | head -1
+
       - name: Download source APK
         env:
           APK_LINK: ${{ inputs.apk_link }}
+          CURL_BIN: curl_chrome116
+          ALL_PROXY: ${{ secrets.APK_PROXY }}
         run: |
           set -euo pipefail
 
@@ -70,15 +85,16 @@ jobs:
 
             chmod +x scripts/apkmirror-dl.sh
 
-            bash scripts/apkmirror-dl.sh \
-              -o "$APK_PATH" \
-              "$APK_LINK"
+            [ -n "${ALL_PROXY:-}" ] || unset ALL_PROXY
+
+            if ! bash scripts/apkmirror-dl.sh -o "$APK_PATH" "$APK_LINK"; then
+              echo "::error::APKMirror blocked this runner (Cloudflare 403)."
+              echo "::error::Fix: download the APK manually, upload it (GitHub Release / GoFile), and pass the direct link in apk_link."
+              exit 1
+            fi
           else
             echo "Downloading APK using curl..."
-
-            curl -fL --retry 3 --retry-delay 2 \
-              "$APK_LINK" \
-              -o "$APK_PATH"
+            curl -fL --retry 3 --retry-delay 2 "$APK_LINK" -o "$APK_PATH"
           fi
 
           if [ ! -s "$APK_PATH" ]; then
@@ -93,7 +109,6 @@ jobs:
         env:
           PATCH_NAME: ${{ inputs.patch }}
           AI_INPUT: ${{ inputs.ai }}
-          # optional: set a repo variable AI_API_URL to use another endpoint
           AI_API_URL: ${{ vars.AI_API_URL }}
         run: |
           set -euo pipefail
@@ -157,7 +172,7 @@ jobs:
           set -euo pipefail
 
           RELEASE_NAME="$(echo "$RELEASE_NAME" | xargs)"
-          
+
           APK_NAME="${APK_NAME%.apk}"
           APK_NAME="$(echo "$APK_NAME" | xargs)"
           APK_PATH="$GITHUB_WORKSPACE/out/${APK_NAME}.apk"
